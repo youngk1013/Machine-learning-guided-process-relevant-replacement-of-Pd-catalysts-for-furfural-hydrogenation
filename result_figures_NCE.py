@@ -6,7 +6,11 @@ Created on Mon Jul 20 14:05:44 2026
 """
 
 #%% Import libraries
+from __future__ import annotations
 
+import argparse
+import os
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -15,7 +19,9 @@ import shap
 import pickle
 import joblib
 import string
+import time
 
+from matplotlib import rcParams
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from matplotlib.cm import ScalarMappable
@@ -25,10 +31,11 @@ from matplotlib.patches import Patch, Rectangle
 import matplotlib.lines as mlines
 from matplotlib.ticker import MaxNLocator
 import matplotlib.gridspec as gridspec
+from matplotlib.gridspec import GridSpec
 from matplotlib import cm, rcParams
 from matplotlib.lines import Line2D
 
-from sklearn.metrics import r2_score, root_mean_squared_error
+from sklearn.metrics import r2_score, root_mean_squared_error, mean_squared_error
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -47,7 +54,7 @@ from catboost import CatBoostRegressor
 import warnings
 warnings.filterwarnings("ignore", category=InconsistentVersionWarning)
 
-from matplotlib import rcParams#%% Load dataset / Preprocessing
+#%% Load dataset / Preprocessing
 dataset = pd.read_csv('./dataset/preprocessed_dataset_for_ML.csv')
 
 #%% Dataset analysis
@@ -97,7 +104,7 @@ X_test  = pd.read_csv('./dataset/ML_dataset_final_x_test.csv')
 y_test  = pd.read_csv('./dataset/ML_dataset_final_y_test.csv')
 
 model = XGBRegressor(random_state=SEED, n_jobs=-1)
-model.load_model(f'./output/grid_search_tuned_model/xgb_model_seed_{SEED}.json')
+model.load_model(f'./hyperparameter_tuning/output/xgb_model_seed_{SEED}.json')
 
 y_test_pred = model.predict(X_test)
 y_train_pred = model.predict(X_train)
@@ -114,7 +121,7 @@ XGB_test_rmse = root_mean_squared_error(y_test, y_test_pred)
 print(f"Train R2 score: {XGB_train_r2:.4f} - RMSE: {XGB_train_rmse:.4f}")
 print(f"Test R2 score:  {XGB_test_r2:.4f} - RMSE: {XGB_test_rmse:.4f}")
 
-#%% Fig 2. ML predictive basis / SHAP / global PDP
+#%% Fig. 2 ML predictive basis / SHAP / global PDP
 
 MM_TO_INCH = 1 / 25.4
 
@@ -184,7 +191,8 @@ def draw_2d_pdv(
     zmax=100
 ):
 
-    X_custom = X_train.copy()
+    X_pdp = X_train.astype(np.float64)
+    X_custom = X_pdp.copy()
 
     if prop_1 == 'Calcination_temp':
         X_custom = X_custom[X_custom[prop_1] >= 100]
@@ -270,7 +278,7 @@ def draw_2d_pdv(
     #PDV calculation
     pd_results = partial_dependence(
         model,
-        X_train,
+        X_pdp,
         features=[prop_1, prop_2],
         custom_values=custom_grid
     )
@@ -447,30 +455,13 @@ def draw_2d_pdv(
     'contour': cp
     }
 
-def draw_1d_pdv(
-    ax,
-    model,
-    X_train,
-    feature,
-    xlabel,
-    title,
-    color,
-    xlim=None,
-    x_ticks=None
-):
+def draw_1d_pdv(ax, model, X_train, feature,  xlabel, title, color, xlim=None, x_ticks=None):  
+    X_pdp = X_train.astype(np.float64)
+    
     display = PartialDependenceDisplay.from_estimator(
-        model,
-        X_train,
-        features=[feature],
-        kind='average',
-        centered=False,
-        grid_resolution=50,
-        ax=ax,
-        line_kw={
-            'color': color,
-            'linewidth': 1.2
-        }
-    )
+        model, X_pdp, features=[feature], kind='average',
+        centered=False, grid_resolution=50,  ax=ax,
+        line_kw={'color': color, 'linewidth': 1.2})
 
     real_ax = display.axes_[0, 0]
 
@@ -754,11 +745,11 @@ panel_label_positions = [
 for panel_label, panel_x, panel_y in panel_label_positions:
     fig.text(panel_x, panel_y, panel_label, fontsize=FS_PANEL, fontweight='bold', ha='left', va='bottom')
     
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/figure_2.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/figure_2.pdf', dpi=300, bbox_inches='tight')
+# plt.savefig('./figure_2.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_2.pdf', dpi=600, bbox_inches='tight')
 plt.show()
 
-#%% Figure 3 Pd-relative operating-window
+#%% Fig. 3 Pd-relative operating-window
 
 X_train_float = X_train.astype(float)
 noble_metal = ['Pd', 'Pt', 'Rh', 'Ru', 'Ir']
@@ -1526,62 +1517,23 @@ upper_limit = max(
     ) * 5
 )
 
-ax6.set_ylim(
-    lower_limit,
-    upper_limit
-)
-
+ax6.set_ylim(lower_limit, upper_limit)
 ax6.set_xticks(x)
+ax6.set_xticklabels(display_labels, rotation=35, ha='center', rotation_mode='anchor', fontsize=FS_TICK)
+ax6.set_ylabel(r'Mean $\Delta Y$ (%)', fontsize=FS_LABEL, labelpad=3)
+ax6.yaxis.set_major_locator(MaxNLocator(nbins=5))
 
-ax6.set_xticklabels(
-    display_labels,
-    rotation=35,
-    ha='center',
-    rotation_mode='anchor',
-    fontsize=FS_TICK
-)
-
-ax6.set_ylabel(
-    r'Mean $\Delta Y$ (%)',
-    fontsize=FS_LABEL,
-    labelpad=3
-)
-
-ax6.yaxis.set_major_locator(
-    MaxNLocator(
-        nbins=5
-    )
-)
-
-for tick, label in zip(
-    ax6.get_xticklabels(),
-    labels
-):
+for tick, label in zip(ax6.get_xticklabels(), labels):
     if label == re_key:
-        tick.set_color(
-            COLOR_RE_TEXT
-        )
-        tick.set_fontweight(
-            'bold'
-        )
+        tick.set_color(COLOR_RE_TEXT)
+        tick.set_fontweight('bold')
 
-add_panel_label(
-    ax6,
-    'f'
-)
+add_panel_label(ax6, 'f')
+style_axis(ax6, grid_axis=None)
+ax6.tick_params(axis='x', pad=6)
 
-style_axis(
-    ax6,
-    grid_axis=None
-)
-
-ax6.tick_params(
-    axis='x',
-    pad=6
-)
-
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/figure_3.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/figure_3.pdf', dpi=300, bbox_inches='tight')
+# plt.savefig('./figure_3.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_3.pdf', dpi=600, bbox_inches='tight')
 plt.show()
 #%% Fig. 4-(a)
 data = {
@@ -1955,16 +1907,14 @@ fig.subplots_adjust(
     top=0.780
 )
 
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/figure_4a_v2.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/figure_4a_v2.pdf', dpi=300, bbox_inches='tight')
+# plt.savefig('./figure_4a.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_4a.pdf', dpi=600, bbox_inches='tight')
 plt.show()
 
-
-#%% Fig 6
+#%% Fig. 6 - MSP comparison
 
 # ── Data ──────────────────────────────────────────────────────────────────
 catalysts = ["Ni–Re", "Pd",     "Ni–Ru", "Ni–Pd", "Ni–Ir",  "Ni–Pt", "Ni–Rh"]
-# MSP       = np.array([2917.6,  3896.04, 3123.44, 3427.99, 4115.92, 4457.49, 4853.52])
 MSP       = np.array([3181.42, 4021.61 , 3439.52, 3873.25, 4523.35, 5175.07, 5366.40])
 yield_exp = np.array([84.26,   86.89,   80.45,   73.34,   73.89,   55.48,   66.48])
 RMV       = np.array([26.60,  1768.29,  222.44,  354.26, 1415.23,  386.41, 1865.34])
@@ -2708,15 +2658,12 @@ fig.legend(
     borderaxespad=0
 )
 
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/figure_6_bc.png', dpi=600, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/figure_6_bc.pdf', dpi=600, bbox_inches='tight')
-# fig.savefig('./논문작성/네이쳐논문그림/pdf_files/figure_6_bc.pdf')   # 벡터 PDF (제출용)
-# fig.savefig('./논문작성/네이쳐논문그림/pdf_files/figure_6_bc.svg')   # PowerPoint 삽입용 벡터
-# fig.savefig('./논문작성/네이쳐논문그림/png_files/figure_6_bc.png', dpi=600)  # 백업용 고해상도 래스터
-# plt.show()
+# plt.savefig('./figure_6_bc.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_6_bc.pdf', dpi=600, bbox_inches='tight') 
+# fig.savefig('./figure_6_bc.svg')   
 plt.show()
 
-#%% Supplementary figures - Dataset distribution
+#%% Supplementary figures - Fig. 1 (Dataset distribution)
 
 active_counts = (dataset[active_metal].gt(0).sum().sort_values(ascending=False))
 active_counts = active_counts[active_counts > 0]
@@ -3059,21 +3006,20 @@ style_axis(
     grid_axis='y'
 )
 
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/supp_figure_data_statistics.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/supp_figure_data_statistics.pdf', dpi=300, bbox_inches='tight')
+# plt.savefig('./figure_supp_1.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_1.pdf', dpi=600, bbox_inches='tight')
 plt.show()
 
-#%% Supplementary figures - All parity plots (Load model result)
+#%% Supplementary figures - Fig. 2 (All parity plots (Load model result))
 
 model_name = ['XGBoost (XGB)', 'CatBoost (CB)', 'Random forest (RF)', 
               'LightGBM (LGBM)', 'Decision tree (DT)', 'Linear regression (LR)',
               'Lasso regression (Lasso)', 'Support vector regression (SVR)', 'Ridge regression (Ridge)']
 
-base_path = './output/grid_search_tuned_model/'
+base_path = './hyperparameter_tuning/output/'
 output_files = ['xgb_model_seed_23.json', 'catboost_model_seed_23.cbm', 'RF_model_seed23.pkl', 
                 'lightGBM_model_seed23.txt', 'DT_model_seed23.pkl', 'lr_model_seed_23.pkl', 
                 'lasso_model_seed_23.pkl', 'svr_model_seed_23.pkl', 'ridge_model_seed_23.pkl']
-
 
 # Prediction results
 pred_results = []
@@ -3091,44 +3037,44 @@ for name, file in zip(model_name, output_files):
         model.load_model(model_path)
     
     if 'lightGBM' in file:
-        model = lgb.Booster(model_file=f'./output/grid_search_tuned_model/lightGBM_model_seed{SEED}.txt')
+        model = lgb.Booster(model_file=f'./hyperparameter_tuning/output/lightGBM_model_seed{SEED}.txt')
     
     if 'DT' in file or 'RF' in file:
         with open(model_path, "rb") as f:
             model = pickle.load(f)
     
     if 'lr' in file:
-        with open(f'./output/grid_search_tuned_model/lr_model_seed_{SEED}.pkl',  'rb') as f:
+        with open(f'./hyperparameter_tuning/output/lr_model_seed_{SEED}.pkl',  'rb') as f:
             model = pickle.load(f)
 
-        with open(f'./output/grid_search_tuned_model/lr_scaler_seed_{SEED}.pkl', 'rb') as f:
+        with open(f'./hyperparameter_tuning/output/lr_scaler_seed_{SEED}.pkl', 'rb') as f:
             scaler = pickle.load(f)
         X_test  = X_test.fillna(0)
         X_test  = scaler.transform(X_test)
 
     if 'lasso' in file:
-        with open(f'./output/grid_search_tuned_model/lasso_model_seed_{SEED}.pkl',  'rb') as f:
+        with open(f'./hyperparameter_tuning/output/lasso_model_seed_{SEED}.pkl',  'rb') as f:
             model = pickle.load(f)
 
-        with open(f'./output/grid_search_tuned_model/lasso_scaler_seed_{SEED}.pkl', 'rb') as f:
+        with open(f'./hyperparameter_tuning/output/lasso_scaler_seed_{SEED}.pkl', 'rb') as f:
             scaler = pickle.load(f)
         X_test  = X_test.fillna(0)
         X_test  = scaler.transform(X_test)
         
     if 'ridge' in file:
-        with open(f'./output/grid_search_tuned_model/ridge_model_seed_{SEED}.pkl',  'rb') as f:
+        with open(f'./hyperparameter_tuning/output/ridge_model_seed_{SEED}.pkl',  'rb') as f:
             model = pickle.load(f)
 
-        with open(f'./output/grid_search_tuned_model/ridge_scaler_seed_{SEED}.pkl', 'rb') as f:
+        with open(f'./hyperparameter_tuning/output/ridge_scaler_seed_{SEED}.pkl', 'rb') as f:
             scaler = pickle.load(f)
         X_test  = X_test.fillna(0)
         X_test  = scaler.transform(X_test)
     
     if 'svr' in file:
-        with open(f'./output/grid_search_tuned_model/svr_model_seed_{SEED}.pkl',  'rb') as f:
+        with open(f'./hyperparameter_tuning/output/svr_model_seed_{SEED}.pkl',  'rb') as f:
             model = pickle.load(f)
 
-        with open(f'./output/grid_search_tuned_model/svr_scaler_seed_{SEED}.pkl', 'rb') as f:
+        with open(f'./hyperparameter_tuning/output/svr_scaler_seed_{SEED}.pkl', 'rb') as f:
             scaler = pickle.load(f)
         X_test  = X_test.fillna(0)
         X_test  = scaler.transform(X_test)
@@ -3147,7 +3093,7 @@ for name, file in zip(model_name, output_files):
 
     print(f"{name}: R2 = {r2:.4f}, RMSE = {rmse:.4f}")
 
-#%% Supplementary figures - All parity plots (Figure)
+#%% Supplementary figures - Fig. 2 (All parity plots (Figure))
 
 MM_TO_INCH = 1 / 25.4
 
@@ -3352,11 +3298,14 @@ fig.subplots_adjust(
     hspace=0.30
 )
 
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/supp_figure_ML_parity_plot.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/supp_figure_ML_parity_plot.pdf', dpi=300, bbox_inches='tight')
+# plt.savefig('./figure_supp_2.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_2.pdf', dpi=600, bbox_inches='tight')
 plt.show()
 
-#%% Supplementary figures - Extended SHAP plots (Operating time)
+#%% Supplementary figures - Fig. 3 (Operating time stratified SHAP summary plot)
+
+model = XGBRegressor(random_state=SEED, n_jobs=-1)
+model.load_model(f'./hyperparameter_tuning/output/xgb_model_seed_{SEED}.json')
 
 MM_TO_INCH = 1 / 25.4
 
@@ -3607,11 +3556,11 @@ cbar.ax.tick_params(
 )
 
 cbar.outline.set_linewidth(0.6)
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/supp_figure_SHAP_operating_time.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/supp_figure_SHAP_operating_time.pdf', dpi=300, bbox_inches='tight')
+# plt.savefig('./figure_supp_3.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_3.pdf', dpi=600, bbox_inches='tight')
 plt.show()
 
-#%% Supplementary figures - Absolute SHAP value / pie chart
+#%% Supplementary figures - Fig. 4 (Absolute SHAP value / category-level SHAP value)
 
 MM_TO_INCH = 1 / 25.4
 
@@ -3796,303 +3745,11 @@ ax2.text(-0.03, 1.035, 'b', transform=ax2.transAxes, fontsize=FS_PANEL,
 
 fig.subplots_adjust(left=0.190, right=0.980, bottom=0.155, top=0.930, wspace=0.58)
 
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/supp_figure_abs_SHAP.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/supp_figure_abs_SHAP.pdf', dpi=300, bbox_inches='tight')
+# plt.savefig('./figure_supp_4.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_4.pdf', dpi=600, bbox_inches='tight')
 plt.show()
 
-#%% Supplementary figures - Potential space for 1X-4Ni candidates (Calculation)
-
-with open('./dataset/molar_mass.pickle', 'rb') as f:
-    molar_mass = pickle.load(f)
-# ['Ca','Co','Cu','Fe','In','Ir','Ni', 'Pd','Pt', 'Re', 'Rh', 'Ru', 'Sn', 'Zn']
-
-precursor_map = {
-    'Ca': 'Ca(NO3)2',   
-    'Co': 'Co(NO3)2',
-    'Cu': 'Cu(NO3)2',
-    'Fe': 'Fe(NO3)3', 
-    'In': 'In(SO3CF3)3', 
-    'Ir': 'IrCl3',
-    'Ni': 'Ni(NO3)2', 
-    'Pd': 'PdCl2', 
-    'Pt': 'H2PtCl6', 
-    'Re': 'NH4ReO4', 
-    'Rh': 'RhCl3',   
-    'Ru': 'RuCl3', 
-    'Sn': 'SnCl4',    
-    'Zn': 'Zn(NO3)2'} 
-
-selected_support = 'Al2O3' 
-selected_solvent = '2-propanol' 
-solvent_amount   = 40
-selected_preparation = 'wet impregnation'
-calc_temp, calc_time = 500, 6
-reduc_temp, reduc_time = 400, 4
-oper_time =  6
-stir_rate = 700
-cat_amount, FF_amount = 100, 300
-
-
-temp_range = np.arange(120, 201, 1)
-pres_range = np.arange(10, 40.5, 0.5)
-
-pd_rows_list = []
-for t in temp_range:
-    for p in pres_range:
-        
-        new_row = {col: 0 for col in dataset.columns[:-1]}
-        
-        AM_1 = 'Pd'
-        precursor_1 = precursor_map[AM_1]
-        
-        new_row[AM_1] = 5.0
-        new_row[precursor_1] = 1
-        new_row[selected_support] = 95.0
-        new_row[selected_preparation] = 1 
-        new_row[selected_solvent] = solvent_amount
-        new_row['Stirring rate (rpm)'] = stir_rate
-        new_row['Catalyst amount (mg)'] = cat_amount
-        new_row['Furfural (mg)'] = FF_amount
-        new_row['Operating_temp'] = t
-        new_row['Operating_pressure'] = p
-        new_row['Operating_time'] = oper_time
-        new_row['Calcination_temp'] = calc_temp
-        new_row['Reduction_temp'] = reduc_temp
-        new_row['Calcination_time'] = calc_time
-        new_row['Reduction_time'] = reduc_time
-        furfural_mmol   = float(FF_amount / molar_mass['Furfural'])
-        AM1_percent =  5.0 * 0.01    
-        subs_to_metal = float(furfural_mmol / (cat_amount * AM1_percent / molar_mass[AM_1]))
-        subs_concentration = float(FF_amount / solvent_amount)
-        new_row['Substrate to metal ratio (mmol/mmol)'] = subs_to_metal
-        new_row['Substrate concentration (mg/ml)'] = subs_concentration
-        
-        pd_rows_list.append(new_row)
-
-Pd_baseline_df = pd.DataFrame(pd_rows_list)
-X_features = dataset.columns.tolist()[:-1] 
-y_pred = model.predict(Pd_baseline_df[X_features])
-y_pred = np.clip(y_pred, 0, 100)
-Pd_baseline_df['THFA_yield (%)'] = y_pred
-Pd_baseline_df['Combination'] = 'Pd (5wt%)'
-
-non_noble_target = ['Co', 'Fe', 'Cu', 'Ca', 'Zn', 'Re']
-total_heatmap_data ={}
-
-for asd in non_noble_target:
-    ni_rows_list = []
-    for t in temp_range:
-        for p in pres_range:
-            
-            new_row = {col: 0 for col in dataset.columns[:-1]}
-            
-            AM_1, AM_2 = 'Ni', asd
-            precursor_1 = precursor_map[AM_1]
-            precursor_2 = precursor_map[AM_2]
-            new_row[AM_1], new_row[AM_2] = 4.0, 1.0
-            new_row[precursor_1], new_row[precursor_2] = 1, 1
-            new_row[selected_support] = 95.0
-            new_row[selected_preparation] = 1 
-            new_row[selected_solvent] = solvent_amount
-            new_row['Stirring rate (rpm)'] = stir_rate
-            new_row['Catalyst amount (mg)'] = cat_amount
-            new_row['Furfural (mg)'] = FF_amount
-            new_row['Operating_temp'] = t
-            new_row['Operating_pressure'] = p
-            new_row['Operating_time'] = oper_time
-            new_row['Calcination_temp'] = calc_temp
-            new_row['Reduction_temp'] = reduc_temp
-            new_row['Calcination_time'] = calc_time
-            new_row['Reduction_time'] = reduc_time
-            furfural_mmol   = float(FF_amount / molar_mass['Furfural'])
-            AM1_percent = 4.0 * 0.01    
-            AM2_percent = 1.0 * 0.01 
-            subs_to_metal = float(furfural_mmol / (cat_amount * AM1_percent / molar_mass[AM_1] + cat_amount * AM2_percent / molar_mass[AM_2]))
-            subs_concentration = float(FF_amount / solvent_amount)
-            new_row['Substrate to metal ratio (mmol/mmol)'] = subs_to_metal
-            new_row['Substrate concentration (mg/ml)'] = subs_concentration
-            
-            ni_rows_list.append(new_row)
-    
-    Ni_X_baseline_df = pd.DataFrame(ni_rows_list)
-    X_features = dataset.columns.tolist()[:-1] 
-    y_pred = model.predict(Ni_X_baseline_df[X_features])
-    y_pred = np.clip(y_pred, 0, 100)
-    Ni_X_baseline_df['THFA_yield (%)'] = y_pred
-    Ni_X_baseline_df['Combination'] = f'Ni (4wt%) / {AM_2} (1wt%)'
-    
-    Ni_X_baseline_df['delta_y'] = (
-        Ni_X_baseline_df['THFA_yield (%)'].values
-        - Pd_baseline_df['THFA_yield (%)'].values
-    )
-    
-    heatmap_data = Ni_X_baseline_df.pivot_table(
-    index='Operating_pressure',
-    columns='Operating_temp',
-    values='delta_y')
-    
-    total_heatmap_data[f'1{asd}-4Ni'] = heatmap_data
-
-non_noble_target = ['Co', 'Fe', 'Cu', 'Ca', 'Zn', 'Re']
-
-vmin, vmax = -70, 20
-v_range = vmax - vmin
-clevels = np.linspace(vmin, vmax, 200)
-
-
-color_nodes = [
-    (0.0, '#001529'),                        
-    (( -35 - vmin) / v_range, '#1e466e'),      
-    (( -10 - vmin) / v_range, '#85a5c2'),     
-    ((  0 - vmin) / v_range, '#ffffff'),     
-    ((  5 - vmin) / v_range, '#e6c875'),      
-    (( 12 - vmin) / v_range, '#d76445'),    
-    (1.0, '#9c1515')                        
-]
-custom_cmap = mcolors.LinearSegmentedColormap.from_list('potential_map', color_nodes)
-
-#%% Supplementary figures - Potential space for 1X-4Ni candidates (figure)
-#Plot
-MM_TO_INCH = 1 / 25.4
-
-FIG_WIDTH = 180 * MM_TO_INCH
-FIG_HEIGHT = 170 * MM_TO_INCH
-
-FS_PANEL = 8.0
-FS_TITLE = 6.5
-FS_AXIS = 6.5
-FS_TICK = 5.5
-FS_CBAR = 6.5
-FS_CBAR_TICK = 5.5
-
-mpl.rcParams.update({
-    'font.family': 'sans-serif',
-    'font.sans-serif': 'Arial',
-
-    'font.size': FS_TICK,
-    'axes.labelsize': FS_AXIS,
-    'axes.titlesize': FS_TITLE,
-    'axes.linewidth': 0.6,
-
-    'xtick.labelsize': FS_TICK,
-    'ytick.labelsize': FS_TICK,
-
-    'xtick.major.size': 2.5,
-    'ytick.major.size': 2.5,
-    'xtick.major.width': 0.6,
-    'ytick.major.width': 0.6,
-
-    'xtick.direction': 'out',
-    'ytick.direction': 'out',
-
-    'pdf.fonttype': 42,
-    'ps.fonttype': 42,
-    'svg.fonttype': 'none',
-
-    'savefig.facecolor': 'white'
-})
-
-panel_labels = string.ascii_lowercase[:len(non_noble_target)]
-
-x_ticks = [120, 140, 160, 180, 200]
-y_ticks = [10, 15, 20, 25, 30, 35, 40]
-
-fig = plt.figure(figsize=(FIG_WIDTH, FIG_HEIGHT), dpi=300)
-gs = fig.add_gridspec(nrows=3, ncols=2, width_ratios=[1.0, 1.0],
-                      left=0.095, right=0.895, bottom=0.075, top=0.965, wspace=0.22, hspace=0.28)
-
-axes = [
-    fig.add_subplot(gs[0, 0]),
-    fig.add_subplot(gs[0, 1]),
-    fig.add_subplot(gs[1, 0]),
-    fig.add_subplot(gs[1, 1]),
-    fig.add_subplot(gs[2, 0]),
-    fig.add_subplot(gs[2, 1])
-]
-
-contour = None
-
-for idx, metal in enumerate(non_noble_target):
-
-    ax = axes[idx]
-
-    heatmap_key = f'1{metal}-4Ni'
-    heatmap_data = total_heatmap_data[heatmap_key]
-
-    temperature = heatmap_data.columns.to_numpy(dtype=float)
-    pressure = heatmap_data.index.to_numpy(dtype=float)
-    ZZ = heatmap_data.to_numpy(dtype=float)
-    TT, PP = np.meshgrid(temperature, pressure)
-    contour = ax.contourf(TT, PP, ZZ, levels=clevels,
-                          cmap=custom_cmap, vmin=vmin, vmax=vmax, extend='both', antialiased=False)
-
-    if hasattr(contour, 'collections'):
-        for collection in contour.collections:
-            collection.set_edgecolor('face')
-            collection.set_linewidth(0.0)
-            collection.set_antialiased(False)
-            collection.set_rasterized(True)
-
-    finite_values = ZZ[np.isfinite(ZZ)]
-
-    if (finite_values.size > 0 and np.nanmin(finite_values) < 0 and np.nanmax(finite_values) > 0):
-        zero_contour = ax.contour(TT, PP, ZZ, levels=[0], colors='black',
-                                  linestyles='--', linewidths=0.8, zorder=4)
-
-        if hasattr(zero_contour, 'collections'):
-            for collection in zero_contour.collections:
-                collection.set_rasterized(False)
-
-    ax.text(-0.025, 1.035, panel_labels[idx], transform=ax.transAxes,
-            fontsize=FS_PANEL, fontweight='bold', ha='left', va='bottom', clip_on=False)
-
-    ax.set_xticks(x_ticks)
-    ax.set_yticks(y_ticks)
-
-    ax.tick_params(axis='both', which='major', labelsize=FS_TICK, direction='out',
-                   width=0.6, length=2.5, pad=2)
-    ax.tick_params(axis='x', labelbottom=True)
-    ax.tick_params(axis='y', labelleft=True)
-
-    if idx in [4, 5]:
-        ax.set_xlabel('Operating temperature (°C)', fontsize=FS_AXIS, labelpad=3)
-    else:
-        ax.set_xlabel('')
-
-    if idx in [0, 2, 4]:
-        ax.set_ylabel('Operating pressure (bar)', fontsize=FS_AXIS, labelpad=3)
-    else:
-        ax.set_ylabel('')
-
-    ax.grid(False)
-
-    for spine in ax.spines.values():
-        spine.set_visible(True)
-        spine.set_linewidth(0.6)
-
-for idx in range(len(non_noble_target), len(axes)):
-    axes[idx].set_visible(False)
-
-fig.canvas.draw()
-right_axes = [ax for idx, ax in enumerate(axes) if (idx % 2 == 1 and ax.get_visible())]
-right_edge = max(ax.get_position().x1 for ax in right_axes)
-top_edge = max(ax.get_position().y1 for ax in axes if ax.get_visible())
-bottom_edge = min(ax.get_position().y0 for ax in axes if ax.get_visible())
-
-cbar_gap = 0.030
-cbar_width = 0.025
-
-cax = fig.add_axes([right_edge + cbar_gap, bottom_edge, cbar_width, top_edge - bottom_edge])
-cbar = fig.colorbar(contour, cax=cax, extend='both')
-cbar.set_ticks([-60, -40, -20, 0, 20])
-cbar.set_label(r'Yield difference, $\Delta Y$ (%)', fontsize=FS_CBAR, labelpad=4)
-cbar.ax.tick_params(axis='y', labelsize=FS_CBAR_TICK, direction='out', width=0.6, length=2.5, pad=2)
-cbar.outline.set_linewidth(0.6)
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/supp_figure_potential_map.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/supp_figure_potential_map.pdf', dpi=300, bbox_inches='tight')
-plt.show()
-
-#%% Supplementary figures - covariate / boostratp calculation (Calculation)
+#%% Supplementary figures - Fig. 5-6 (covariate / boostrap calculation (Calculation))
 X_train_float = X_train.astype(float) 
 noble_metal = ['Pd', 'Pt', 'Rh', 'Ru', 'Ir']
 
@@ -4715,7 +4372,7 @@ def run_overlap_weighted_family_pdp(
 
     return results, diagnostic_summary
 
-#%% Supplementary figures - covariate / boostratp calculation (figure)
+#%% Supplementary figures - Fig. 5
 features = [
     'Operating_temp',
     'Operating_pressure',
@@ -4980,11 +4637,11 @@ fig.subplots_adjust(
     hspace=0.34
 )
 
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/supp_figure_covariate_comparison.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/supp_figure_covariate_comparison.pdf', dpi=300, bbox_inches='tight')
+# plt.savefig('./figure_supp_5.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_5.pdf', dpi=600, bbox_inches='tight')
 plt.show()
 
-#%% Supplementary figures - covariate / boostratp calculation (figure)
+#%% Supplementary figures - Fig. 6
 MM_TO_INCH = 1 / 25.4
 
 COLOR_PD = '#D95F5F'
@@ -5309,6 +4966,1440 @@ fig.subplots_adjust(
     wspace=0.20
 )
 
-# plt.savefig('./논문작성/네이쳐논문그림/png_files/supp_figure_overlap_PDP.png', dpi=300, bbox_inches='tight')
-# plt.savefig('./논문작성/네이쳐논문그림/pdf_files/supp_figure_overlap_PDP.pdf', dpi=300, bbox_inches='tight')
+# plt.savefig('./figure_supp_6.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_6.pdf', dpi=600, bbox_inches='tight')
+plt.show()
+
+#%% Supplementary figures - Fig. 7 (Potential space for 1X-4Ni candidates (Calculation))
+
+with open('./dataset/molar_mass.pickle', 'rb') as f:
+    molar_mass = pickle.load(f)
+# ['Ca','Co','Cu','Fe','In','Ir','Ni', 'Pd','Pt', 'Re', 'Rh', 'Ru', 'Sn', 'Zn']
+
+precursor_map = {
+    'Ca': 'Ca(NO3)2',   
+    'Co': 'Co(NO3)2',
+    'Cu': 'Cu(NO3)2',
+    'Fe': 'Fe(NO3)3', 
+    'In': 'In(SO3CF3)3', 
+    'Ir': 'IrCl3',
+    'Ni': 'Ni(NO3)2', 
+    'Pd': 'PdCl2', 
+    'Pt': 'H2PtCl6', 
+    'Re': 'NH4ReO4', 
+    'Rh': 'RhCl3',   
+    'Ru': 'RuCl3', 
+    'Sn': 'SnCl4',    
+    'Zn': 'Zn(NO3)2'} 
+
+selected_support = 'Al2O3' 
+selected_solvent = '2-propanol' 
+solvent_amount   = 40
+selected_preparation = 'wet impregnation'
+calc_temp, calc_time = 500, 6
+reduc_temp, reduc_time = 400, 4
+oper_time =  6
+stir_rate = 700
+cat_amount, FF_amount = 100, 300
+
+
+temp_range = np.arange(120, 201, 1)
+pres_range = np.arange(10, 40.5, 0.5)
+
+pd_rows_list = []
+for t in temp_range:
+    for p in pres_range:
+        
+        new_row = {col: 0 for col in dataset.columns[:-1]}
+        
+        AM_1 = 'Pd'
+        precursor_1 = precursor_map[AM_1]
+        
+        new_row[AM_1] = 5.0
+        new_row[precursor_1] = 1
+        new_row[selected_support] = 95.0
+        new_row[selected_preparation] = 1 
+        new_row[selected_solvent] = solvent_amount
+        new_row['Stirring rate (rpm)'] = stir_rate
+        new_row['Catalyst amount (mg)'] = cat_amount
+        new_row['Furfural (mg)'] = FF_amount
+        new_row['Operating_temp'] = t
+        new_row['Operating_pressure'] = p
+        new_row['Operating_time'] = oper_time
+        new_row['Calcination_temp'] = calc_temp
+        new_row['Reduction_temp'] = reduc_temp
+        new_row['Calcination_time'] = calc_time
+        new_row['Reduction_time'] = reduc_time
+        furfural_mmol   = float(FF_amount / molar_mass['Furfural'])
+        AM1_percent =  5.0 * 0.01    
+        subs_to_metal = float(furfural_mmol / (cat_amount * AM1_percent / molar_mass[AM_1]))
+        subs_concentration = float(FF_amount / solvent_amount)
+        new_row['Substrate to metal ratio (mmol/mmol)'] = subs_to_metal
+        new_row['Substrate concentration (mg/ml)'] = subs_concentration
+        
+        pd_rows_list.append(new_row)
+
+Pd_baseline_df = pd.DataFrame(pd_rows_list)
+X_features = dataset.columns.tolist()[:-1] 
+y_pred = model.predict(Pd_baseline_df[X_features])
+y_pred = np.clip(y_pred, 0, 100)
+Pd_baseline_df['THFA_yield (%)'] = y_pred
+Pd_baseline_df['Combination'] = 'Pd (5wt%)'
+
+non_noble_target = ['Co', 'Fe', 'Cu', 'Ca', 'Zn', 'Re']
+total_heatmap_data ={}
+
+for asd in non_noble_target:
+    ni_rows_list = []
+    for t in temp_range:
+        for p in pres_range:
+            
+            new_row = {col: 0 for col in dataset.columns[:-1]}
+            
+            AM_1, AM_2 = 'Ni', asd
+            precursor_1 = precursor_map[AM_1]
+            precursor_2 = precursor_map[AM_2]
+            new_row[AM_1], new_row[AM_2] = 4.0, 1.0
+            new_row[precursor_1], new_row[precursor_2] = 1, 1
+            new_row[selected_support] = 95.0
+            new_row[selected_preparation] = 1 
+            new_row[selected_solvent] = solvent_amount
+            new_row['Stirring rate (rpm)'] = stir_rate
+            new_row['Catalyst amount (mg)'] = cat_amount
+            new_row['Furfural (mg)'] = FF_amount
+            new_row['Operating_temp'] = t
+            new_row['Operating_pressure'] = p
+            new_row['Operating_time'] = oper_time
+            new_row['Calcination_temp'] = calc_temp
+            new_row['Reduction_temp'] = reduc_temp
+            new_row['Calcination_time'] = calc_time
+            new_row['Reduction_time'] = reduc_time
+            furfural_mmol   = float(FF_amount / molar_mass['Furfural'])
+            AM1_percent = 4.0 * 0.01    
+            AM2_percent = 1.0 * 0.01 
+            subs_to_metal = float(furfural_mmol / (cat_amount * AM1_percent / molar_mass[AM_1] + cat_amount * AM2_percent / molar_mass[AM_2]))
+            subs_concentration = float(FF_amount / solvent_amount)
+            new_row['Substrate to metal ratio (mmol/mmol)'] = subs_to_metal
+            new_row['Substrate concentration (mg/ml)'] = subs_concentration
+            
+            ni_rows_list.append(new_row)
+    
+    Ni_X_baseline_df = pd.DataFrame(ni_rows_list)
+    X_features = dataset.columns.tolist()[:-1] 
+    y_pred = model.predict(Ni_X_baseline_df[X_features])
+    y_pred = np.clip(y_pred, 0, 100)
+    Ni_X_baseline_df['THFA_yield (%)'] = y_pred
+    Ni_X_baseline_df['Combination'] = f'Ni (4wt%) / {AM_2} (1wt%)'
+    
+    Ni_X_baseline_df['delta_y'] = (
+        Ni_X_baseline_df['THFA_yield (%)'].values
+        - Pd_baseline_df['THFA_yield (%)'].values
+    )
+    
+    heatmap_data = Ni_X_baseline_df.pivot_table(
+    index='Operating_pressure',
+    columns='Operating_temp',
+    values='delta_y')
+    
+    total_heatmap_data[f'1{asd}-4Ni'] = heatmap_data
+
+non_noble_target = ['Co', 'Fe', 'Cu', 'Ca', 'Zn', 'Re']
+
+vmin, vmax = -70, 20
+v_range = vmax - vmin
+clevels = np.linspace(vmin, vmax, 200)
+
+
+color_nodes = [
+    (0.0, '#001529'),                        
+    (( -35 - vmin) / v_range, '#1e466e'),      
+    (( -10 - vmin) / v_range, '#85a5c2'),     
+    ((  0 - vmin) / v_range, '#ffffff'),     
+    ((  5 - vmin) / v_range, '#e6c875'),      
+    (( 12 - vmin) / v_range, '#d76445'),    
+    (1.0, '#9c1515')                        
+]
+custom_cmap = mcolors.LinearSegmentedColormap.from_list('potential_map', color_nodes)
+
+#%% Supplementary figures - Fig. 7 (Potential space for 1X-4Ni candidates (figure))
+#Plot
+MM_TO_INCH = 1 / 25.4
+
+FIG_WIDTH = 180 * MM_TO_INCH
+FIG_HEIGHT = 170 * MM_TO_INCH
+
+FS_PANEL = 8.0
+FS_TITLE = 6.5
+FS_AXIS = 6.5
+FS_TICK = 5.5
+FS_CBAR = 6.5
+FS_CBAR_TICK = 5.5
+
+mpl.rcParams.update({
+    'font.family': 'sans-serif',
+    'font.sans-serif': 'Arial',
+
+    'font.size': FS_TICK,
+    'axes.labelsize': FS_AXIS,
+    'axes.titlesize': FS_TITLE,
+    'axes.linewidth': 0.6,
+
+    'xtick.labelsize': FS_TICK,
+    'ytick.labelsize': FS_TICK,
+
+    'xtick.major.size': 2.5,
+    'ytick.major.size': 2.5,
+    'xtick.major.width': 0.6,
+    'ytick.major.width': 0.6,
+
+    'xtick.direction': 'out',
+    'ytick.direction': 'out',
+
+    'pdf.fonttype': 42,
+    'ps.fonttype': 42,
+    'svg.fonttype': 'none',
+
+    'savefig.facecolor': 'white'
+})
+
+panel_labels = string.ascii_lowercase[:len(non_noble_target)]
+
+x_ticks = [120, 140, 160, 180, 200]
+y_ticks = [10, 15, 20, 25, 30, 35, 40]
+
+fig = plt.figure(figsize=(FIG_WIDTH, FIG_HEIGHT), dpi=300)
+gs = fig.add_gridspec(nrows=3, ncols=2, width_ratios=[1.0, 1.0],
+                      left=0.095, right=0.895, bottom=0.075, top=0.965, wspace=0.22, hspace=0.28)
+
+axes = [
+    fig.add_subplot(gs[0, 0]),
+    fig.add_subplot(gs[0, 1]),
+    fig.add_subplot(gs[1, 0]),
+    fig.add_subplot(gs[1, 1]),
+    fig.add_subplot(gs[2, 0]),
+    fig.add_subplot(gs[2, 1])
+]
+
+contour = None
+
+for idx, metal in enumerate(non_noble_target):
+
+    ax = axes[idx]
+
+    heatmap_key = f'1{metal}-4Ni'
+    heatmap_data = total_heatmap_data[heatmap_key]
+
+    temperature = heatmap_data.columns.to_numpy(dtype=float)
+    pressure = heatmap_data.index.to_numpy(dtype=float)
+    ZZ = heatmap_data.to_numpy(dtype=float)
+    TT, PP = np.meshgrid(temperature, pressure)
+    contour = ax.contourf(TT, PP, ZZ, levels=clevels,
+                          cmap=custom_cmap, vmin=vmin, vmax=vmax, extend='both', antialiased=False)
+
+    if hasattr(contour, 'collections'):
+        for collection in contour.collections:
+            collection.set_edgecolor('face')
+            collection.set_linewidth(0.0)
+            collection.set_antialiased(False)
+            collection.set_rasterized(True)
+
+    finite_values = ZZ[np.isfinite(ZZ)]
+
+    if (finite_values.size > 0 and np.nanmin(finite_values) < 0 and np.nanmax(finite_values) > 0):
+        zero_contour = ax.contour(TT, PP, ZZ, levels=[0], colors='black',
+                                  linestyles='--', linewidths=0.8, zorder=4)
+
+        if hasattr(zero_contour, 'collections'):
+            for collection in zero_contour.collections:
+                collection.set_rasterized(False)
+
+    ax.text(-0.025, 1.035, panel_labels[idx], transform=ax.transAxes,
+            fontsize=FS_PANEL, fontweight='bold', ha='left', va='bottom', clip_on=False)
+
+    ax.set_xticks(x_ticks)
+    ax.set_yticks(y_ticks)
+
+    ax.tick_params(axis='both', which='major', labelsize=FS_TICK, direction='out',
+                   width=0.6, length=2.5, pad=2)
+    ax.tick_params(axis='x', labelbottom=True)
+    ax.tick_params(axis='y', labelleft=True)
+
+    if idx in [4, 5]:
+        ax.set_xlabel('Operating temperature (°C)', fontsize=FS_AXIS, labelpad=3)
+    else:
+        ax.set_xlabel('')
+
+    if idx in [0, 2, 4]:
+        ax.set_ylabel('Operating pressure (bar)', fontsize=FS_AXIS, labelpad=3)
+    else:
+        ax.set_ylabel('')
+
+    ax.grid(False)
+
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_linewidth(0.6)
+
+for idx in range(len(non_noble_target), len(axes)):
+    axes[idx].set_visible(False)
+
+fig.canvas.draw()
+right_axes = [ax for idx, ax in enumerate(axes) if (idx % 2 == 1 and ax.get_visible())]
+right_edge = max(ax.get_position().x1 for ax in right_axes)
+top_edge = max(ax.get_position().y1 for ax in axes if ax.get_visible())
+bottom_edge = min(ax.get_position().y0 for ax in axes if ax.get_visible())
+
+cbar_gap = 0.030
+cbar_width = 0.025
+
+cax = fig.add_axes([right_edge + cbar_gap, bottom_edge, cbar_width, top_edge - bottom_edge])
+cbar = fig.colorbar(contour, cax=cax, extend='both')
+cbar.set_ticks([-60, -40, -20, 0, 20])
+cbar.set_label(r'Yield difference, $\Delta Y$ (%)', fontsize=FS_CBAR, labelpad=4)
+cbar.ax.tick_params(axis='y', labelsize=FS_CBAR_TICK, direction='out', width=0.6, length=2.5, pad=2)
+cbar.outline.set_linewidth(0.6)
+# plt.savefig('./figure_supp_7.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_7.pdf', dpi=600, bbox_inches='tight')
+plt.show()
+
+#%% Supplementary figures - Fig. 8 (bootstrap stability (Calculation))
+
+B = 200
+BOOTSTRAP_SEED = 20260721
+MODEL_SEED = 23
+
+# True: calculate the bootstrap ensemble again
+# False: load bootstrap_ensemble_results.npz when it already exists
+RECALCULATE = False
+
+DATA_DIR = "./dataset"
+MODEL_DIR = "./hyperparameter_tuning/output"
+
+X_TRAIN_PATH = f"{DATA_DIR}/ML_dataset_final_x_train.csv"
+Y_TRAIN_PATH = f"{DATA_DIR}/ML_dataset_final_y_train.csv"
+X_TEST_PATH = f"{DATA_DIR}/ML_dataset_final_x_test.csv"
+Y_TEST_PATH = f"{DATA_DIR}/ML_dataset_final_y_test.csv"
+MOLAR_MASS_PATH = f"{DATA_DIR}/molar_mass.pickle"
+
+PARAM_PATH = f"{MODEL_DIR}/xgb_params_seed_{MODEL_SEED}.pkl"
+MODEL_PATH = f"{MODEL_DIR}/xgb_model_seed_{MODEL_SEED}.json"
+
+RESULT_PATH = "./bootstrap_output/bootstrap_ensemble_results.npz"
+SUMMARY_PATH = "./bootstrap_output/positive_region_stability_summary.csv"
+
+# =============================================================================
+# Candidate and operating conditions
+# =============================================================================
+candidate_metals = ["Co", "Fe", "Cu", "Ca", "Zn", "Re"]
+candidate_labels = [f"1{metal}-4Ni" for metal in candidate_metals]
+thresholds = np.arange(-10.0, 11.0, 1.0)
+
+temperature_range = np.arange(120.0, 201.0, 1.0)
+pressure_range = np.arange(10.0, 40.5, 0.5)
+
+precursor_map = {
+    "Ca": "Ca(NO3)2",
+    "Co": "Co(NO3)2",
+    "Cu": "Cu(NO3)2",
+    "Fe": "Fe(NO3)3",
+    "Ni": "Ni(NO3)2",
+    "Pd": "PdCl2",
+    "Re": "NH4ReO4",
+    "Zn": "Zn(NO3)2",
+}
+
+support = "Al2O3"
+solvent = "2-propanol"
+preparation = "wet impregnation"
+
+solvent_amount = 40.0
+calcination_temperature = 500.0
+calcination_time = 6.0
+reduction_temperature = 400.0
+reduction_time = 4.0
+operating_time = 6.0
+stirring_rate = 700.0
+catalyst_amount = 100.0
+furfural_amount = 300.0
+
+
+# =============================================================================
+# Helper functions
+# =============================================================================
+def build_case(feature_names, molar_mass, active_metals):
+    """Create one catalyst case over the temperature-pressure grid."""
+    temperature_grid, pressure_grid = np.meshgrid(
+        temperature_range,
+        pressure_range,
+        indexing="xy",
+    )
+
+    temperatures = temperature_grid.ravel()
+    pressures = pressure_grid.ravel()
+
+    case = pd.DataFrame(
+        0.0,
+        index=np.arange(len(temperatures)),
+        columns=feature_names,
+    )
+
+    for metal, loading in active_metals.items():
+        case[metal] = loading
+        case[precursor_map[metal]] = 1.0
+
+    case[support] = 100.0 - sum(active_metals.values())
+    case[preparation] = 1.0
+    case[solvent] = solvent_amount
+
+    case["Stirring rate (rpm)"] = stirring_rate
+    case["Catalyst amount (mg)"] = catalyst_amount
+    case["Furfural (mg)"] = furfural_amount
+
+    case["Operating_temp"] = temperatures
+    case["Operating_pressure"] = pressures
+    case["Operating_time"] = operating_time
+
+    case["Calcination_temp"] = calcination_temperature
+    case["Calcination_time"] = calcination_time
+    case["Reduction_temp"] = reduction_temperature
+    case["Reduction_time"] = reduction_time
+
+    furfural_mmol = furfural_amount / molar_mass["Furfural"]
+
+    metal_mmol = sum(
+        catalyst_amount
+        * (loading / 100.0)
+        / molar_mass[metal]
+        for metal, loading in active_metals.items()
+    )
+
+    case["Substrate to metal ratio (mmol/mmol)"] = (
+        furfural_mmol / metal_mmol
+    )
+    case["Substrate concentration (mg/ml)"] = (
+        furfural_amount / solvent_amount
+    )
+
+    return case, temperatures, pressures
+
+
+def predict_delta(model, pd_case, candidate_cases):
+    """Calculate candidate yield minus Pd yield over the operating grid."""
+    pd_prediction = np.clip(
+        model.predict(pd_case),
+        0.0,
+        100.0,
+    )
+
+    delta = []
+
+    for label in candidate_labels:
+        candidate_prediction = np.clip(
+            model.predict(candidate_cases[label]),
+            0.0,
+            100.0,
+        )
+        delta.append(candidate_prediction - pd_prediction)
+
+    return np.asarray(delta, dtype=np.float32)
+
+
+# =============================================================================
+# Load data and model information
+# =============================================================================
+x_train = pd.read_csv(X_TRAIN_PATH)
+y_train = pd.read_csv(Y_TRAIN_PATH).iloc[:, 0]
+
+x_test = pd.read_csv(X_TEST_PATH)
+y_test = pd.read_csv(Y_TEST_PATH).iloc[:, 0]
+
+with open(MOLAR_MASS_PATH, "rb") as file:
+    molar_mass = pickle.load(file)
+
+with open(PARAM_PATH, "rb") as file:
+    xgb_params = pickle.load(file)
+
+
+# =============================================================================
+# Build Pd and candidate operating grids
+# =============================================================================
+pd_case, temperatures, pressures = build_case(
+    feature_names=x_train.columns,
+    molar_mass=molar_mass,
+    active_metals={"Pd": 5.0},
+)
+
+candidate_cases = {}
+
+for metal, label in zip(candidate_metals, candidate_labels):
+    candidate_cases[label], _, _ = build_case(
+        feature_names=x_train.columns,
+        molar_mass=molar_mass,
+        active_metals={
+            "Ni": 4.0,
+            metal: 1.0,
+        },
+    )
+
+print(f"Training data: {x_train.shape}")
+print(f"Test data: {x_test.shape}")
+print(f"Operating grid: {len(pd_case):,} points")
+
+
+# =============================================================================
+# Load existing bootstrap result or calculate again
+# =============================================================================
+if os.path.exists(RESULT_PATH) and not RECALCULATE:
+    result = np.load(RESULT_PATH)
+
+    bootstrap_delta = result["delta_y"]
+    test_r2 = result["test_r2"]
+    test_rmse = result["test_rmse"]
+    mean_gap = result["mean_gap"]
+    fraction_by_threshold = result["fraction_by_threshold"]
+    ranks_by_threshold = result["ranks_by_threshold"]
+    nominal_delta = result["nominal_delta_y"]
+
+    print(f"Loaded: {RESULT_PATH}")
+
+else:
+    # -------------------------------------------------------------------------
+    # Nominal model
+    # -------------------------------------------------------------------------
+    nominal_model = XGBRegressor(
+        random_state=MODEL_SEED,
+        n_jobs=-1,
+        **xgb_params,
+    )
+    nominal_model.load_model(MODEL_PATH)
+
+    nominal_delta = predict_delta(
+        model=nominal_model,
+        pd_case=pd_case,
+        candidate_cases=candidate_cases,
+    )
+
+    re_index = candidate_labels.index("1Re-4Ni")
+
+    nominal_re_fraction = (
+        np.mean(nominal_delta[re_index] >= 0.0)
+        * 100.0
+    )
+    nominal_re_mean_gap = np.mean(
+        nominal_delta[re_index]
+    )
+
+    print(
+        f"Nominal Re-Ni fraction: {nominal_re_fraction:.3f}%"
+    )
+    print(
+        f"Nominal Re-Ni mean ΔY: {nominal_re_mean_gap:.3f} pp"
+    )
+
+    # -------------------------------------------------------------------------
+    # Bootstrap refits
+    # -------------------------------------------------------------------------
+    n_train = len(x_train)
+    n_candidates = len(candidate_labels)
+    n_grid = len(pd_case)
+
+    bootstrap_delta = np.zeros(
+        (B, n_candidates, n_grid),
+        dtype=np.float32,
+    )
+    test_r2 = np.zeros(B)
+    test_rmse = np.zeros(B)
+
+    start_time = time.time()
+
+    for bootstrap_index in range(B):
+        rng = np.random.default_rng(
+            BOOTSTRAP_SEED + bootstrap_index
+        )
+
+        sampled_rows = rng.integers(
+            0,
+            n_train,
+            size=n_train,
+        )
+
+        model = XGBRegressor(
+            random_state=BOOTSTRAP_SEED + bootstrap_index,
+            n_jobs=-1,
+            **xgb_params,
+        )
+
+        model.fit(
+            x_train.iloc[sampled_rows],
+            y_train.iloc[sampled_rows],
+            verbose=False,
+        )
+
+        bootstrap_delta[bootstrap_index] = predict_delta(
+            model=model,
+            pd_case=pd_case,
+            candidate_cases=candidate_cases,
+        )
+
+        test_prediction = np.clip(
+            model.predict(x_test),
+            0.0,
+            100.0,
+        )
+
+        test_r2[bootstrap_index] = r2_score(
+            y_test,
+            test_prediction,
+        )
+        test_rmse[bootstrap_index] = np.sqrt(
+            mean_squared_error(
+                y_test,
+                test_prediction,
+            )
+        )
+
+        if (
+            (bootstrap_index + 1) % 10 == 0
+            or bootstrap_index + 1 == B
+        ):
+            elapsed_min = (time.time() - start_time) / 60.0
+
+            print(
+                f"Bootstrap {bootstrap_index + 1}/{B} | "
+                f"RMSE={test_rmse[bootstrap_index]:.3f} | "
+                f"elapsed={elapsed_min:.1f} min"
+            )
+
+    # -------------------------------------------------------------------------
+    # Positive-region fractions and candidate rankings
+    # -------------------------------------------------------------------------
+    mean_gap = np.mean(
+        bootstrap_delta,
+        axis=2,
+    )
+
+    fraction_by_threshold = np.mean(
+        bootstrap_delta[:, :, :, None]
+        >= thresholds[None, None, None, :],
+        axis=2,
+    ) * 100.0
+
+    ranks_by_threshold = np.zeros(
+        fraction_by_threshold.shape,
+        dtype=np.int16,
+    )
+
+    for bootstrap_index in range(B):
+        for threshold_index in range(len(thresholds)):
+            # Larger region fraction is better.
+            # Mean ΔY is used only to resolve ties.
+            order = np.lexsort(
+                (
+                    -mean_gap[bootstrap_index],
+                    -fraction_by_threshold[
+                        bootstrap_index,
+                        :,
+                        threshold_index,
+                    ],
+                )
+            )
+
+            ranks_by_threshold[
+                bootstrap_index,
+                order,
+                threshold_index,
+            ] = np.arange(
+                1,
+                len(candidate_labels) + 1,
+            )
+
+    np.savez_compressed(
+        RESULT_PATH,
+        delta_y=bootstrap_delta,
+        test_r2=test_r2,
+        test_rmse=test_rmse,
+        mean_gap=mean_gap,
+        fraction_by_threshold=fraction_by_threshold,
+        ranks_by_threshold=ranks_by_threshold,
+        thresholds=thresholds,
+        candidate_labels=np.asarray(candidate_labels),
+        temperatures=temperatures,
+        pressures=pressures,
+        nominal_delta_y=nominal_delta,
+    )
+
+    print(f"Saved: {RESULT_PATH}")
+
+
+# =============================================================================
+# Save a compact summary table
+# =============================================================================
+zero_index = np.flatnonzero(
+    np.isclose(thresholds, 0.0)
+)[0]
+
+fractions_zero = fraction_by_threshold[
+    :,
+    :,
+    zero_index,
+]
+
+ranks_zero = ranks_by_threshold[
+    :,
+    :,
+    zero_index,
+]
+
+summary = []
+
+for candidate_index, label in enumerate(candidate_labels):
+    values = fractions_zero[:, candidate_index]
+
+    summary.append(
+        {
+            "Catalyst": label,
+            "Nominal fraction (%)": (
+                np.mean(
+                    nominal_delta[candidate_index] >= 0.0
+                )
+                * 100.0
+            ),
+            "Bootstrap median fraction (%)": np.median(values),
+            "Bootstrap 2.5th fraction (%)": np.percentile(
+                values,
+                2.5,
+            ),
+            "Bootstrap 97.5th fraction (%)": np.percentile(
+                values,
+                97.5,
+            ),
+            "Non-zero region frequency (%)": np.mean(
+                values > 0.0
+            )
+            * 100.0,
+            "Rank-1 frequency (%)": np.mean(
+                ranks_zero[:, candidate_index] == 1
+            )
+            * 100.0,
+        }
+    )
+
+summary_df = pd.DataFrame(summary)
+summary_df.to_csv(SUMMARY_PATH, index=False)
+ 
+#%% Supplementary figures - Fig. 8 (bootstrap stability (Figure))
+
+RESULT_PATH = "./bootstrap_output/bootstrap_ensemble_results.npz"
+
+result = np.load(RESULT_PATH)
+
+labels = result["candidate_labels"].astype(str).tolist()
+thresholds = result["thresholds"].astype(float)
+nominal_delta = result["nominal_delta_y"].astype(float)
+
+zero_index = np.flatnonzero(
+    np.isclose(thresholds, 0.0)
+)[0]
+
+fractions = result[
+    "fraction_by_threshold"
+][:, :, zero_index]
+
+ranks = result[
+    "ranks_by_threshold"
+][:, :, zero_index]
+
+bootstrap_count = fractions.shape[0]
+re_index = labels.index("1Re-4Ni")
+
+re_fraction = fractions[:, re_index]
+
+nominal_fraction = (
+    np.mean(nominal_delta[re_index] >= 0.0)
+    * 100.0
+)
+
+median_fraction = np.median(re_fraction)
+
+low_fraction, high_fraction = np.percentile(
+    re_fraction,
+    [2.5, 97.5],
+)
+
+zero_count = np.sum(
+    re_fraction == 0.0
+)
+
+positive_counts = np.sum(
+    fractions > 0.0,
+    axis=0,
+)
+
+positive_frequency = (
+    positive_counts
+    / bootstrap_count
+    * 100.0
+)
+
+rank1_counts = np.sum(
+    ranks == 1,
+    axis=0,
+)
+
+rank1_frequency = (
+    rank1_counts
+    / bootstrap_count
+    * 100.0
+)
+
+
+# =============================================================================
+# Figure settings
+# =============================================================================
+mpl.rcParams.update(
+    {
+        "font.family": "sans-serif",
+        "font.sans-serif": [
+            "Arial",
+            "Helvetica",
+            "Liberation Sans",
+            "DejaVu Sans",
+        ],
+        "font.size": 6.3,
+        "axes.labelsize": 6.7,
+        "xtick.labelsize": 5.5,
+        "ytick.labelsize": 5.7,
+        "legend.fontsize": 5.3,
+        "axes.linewidth": 0.65,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    }
+)
+
+
+def style_axis(axis):
+    axis.grid(False)
+
+    axis.tick_params(
+        direction="out",
+        width=0.6,
+        length=2.5,
+        pad=2,
+    )
+
+    for spine in axis.spines.values():
+        spine.set_linewidth(0.65)
+
+
+def panel_label(axis, label):
+    axis.text(
+        0.0,
+        1.04,
+        label,
+        transform=axis.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=8.2,
+        fontweight="bold",
+    )
+
+
+mm_to_inch = 1.0 / 25.4
+
+fig = plt.figure(
+    figsize=(
+        180 * mm_to_inch,
+        64 * mm_to_inch,
+    ),
+    dpi=300,
+)
+
+grid = fig.add_gridspec(
+    1,
+    3,
+    width_ratios=[1.28, 1.0, 1.0],
+    left=0.065,
+    right=0.985,
+    bottom=0.185,
+    top=0.90,
+    wspace=0.38,
+)
+
+ax_a = fig.add_subplot(grid[0, 0])
+ax_b = fig.add_subplot(grid[0, 1])
+ax_c = fig.add_subplot(grid[0, 2])
+
+color_re = "#E69F00"
+color_re_dark = "#9E5A00"
+color_other = "#8EB3CC"
+edge_color = "#3F3F3F"
+
+
+# =============================================================================
+# Panel a
+# =============================================================================
+bins = np.arange(-2.5, 102.6, 5.0)
+
+counts, _, _ = ax_a.hist(
+    re_fraction,
+    bins=bins,
+    color=color_re,
+    edgecolor=edge_color,
+    linewidth=0.4,
+)
+
+ymax = max(
+    float(np.max(counts)),
+    1.0,
+)
+
+ax_a.vlines(
+    nominal_fraction,
+    0,
+    ymax * 1.06,
+    color="#222222",
+    linestyle="--",
+    linewidth=1.0,
+)
+
+ax_a.vlines(
+    median_fraction,
+    0,
+    ymax * 1.06,
+    color=color_re_dark,
+    linewidth=1.1,
+)
+
+bracket_y = ymax * 0.70
+
+ax_a.hlines(
+    bracket_y,
+    low_fraction,
+    high_fraction,
+    color=edge_color,
+    linewidth=0.8,
+)
+
+ax_a.vlines(
+    [low_fraction, high_fraction],
+    bracket_y - ymax * 0.035,
+    bracket_y + ymax * 0.035,
+    color=edge_color,
+    linewidth=0.8,
+)
+
+ax_a.text(
+    (low_fraction + high_fraction) / 2.0,
+    bracket_y + ymax * 0.06,
+    f"95% interval: {low_fraction:.0f}-{high_fraction:.0f}%",
+    ha="center",
+    va="bottom",
+    fontsize=5.5,
+)
+
+ax_a.text(
+    4.0,
+    ymax * 0.50,
+    f"Zero region in {zero_count}/{bootstrap_count} refits",
+    ha="left",
+    va="center",
+    fontsize=5.5,
+)
+
+ax_a.set_xlim(-2.5, 102.5)
+ax_a.set_ylim(0, ymax * 1.34)
+
+ax_a.set_xlabel(
+    "Re-Ni positive-region fraction (%)"
+)
+ax_a.set_ylabel(
+    "Number of bootstrap refits"
+)
+
+ax_a.legend(
+    handles=[
+        Line2D(
+            [0],
+            [0],
+            color="#222222",
+            linestyle="--",
+            linewidth=1.0,
+            label=f"Nominal = {nominal_fraction:.1f}%",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=color_re_dark,
+            linewidth=1.1,
+            label=f"Bootstrap median = {median_fraction:.1f}%",
+        ),
+    ],
+    loc="upper right",
+    frameon=False,
+    handlelength=2.0,
+)
+
+panel_label(ax_a, "a")
+style_axis(ax_a)
+
+
+# =============================================================================
+# Panel b
+# =============================================================================
+x = np.arange(len(labels))
+
+colors = [
+    color_re if label == "1Re-4Ni" else color_other
+    for label in labels
+]
+
+ax_b.bar(
+    x,
+    positive_frequency,
+    width=0.68,
+    color=colors,
+    edgecolor=edge_color,
+    linewidth=0.4,
+)
+
+for index, (count, value) in enumerate(
+    zip(
+        positive_counts,
+        positive_frequency,
+    )
+):
+    ax_b.text(
+        index,
+        value + 1.4,
+        f"{value:.1f}%\n({count}/{bootstrap_count})",
+        ha="center",
+        va="bottom",
+        fontsize=5.2,
+        fontweight=(
+            "bold"
+            if labels[index] == "1Re-4Ni"
+            else "normal"
+        ),
+    )
+
+ax_b.set_ylim(0, 61)
+ax_b.set_yticks(
+    [0, 10, 20, 30, 40, 50, 60]
+)
+
+ax_b.set_ylabel(
+    "Refits with a non-zero\npositive region (%)"
+)
+
+ax_b.set_xticks(x)
+ax_b.set_xticklabels(
+    labels,
+    rotation=38,
+    ha="right",
+    rotation_mode="anchor",
+)
+
+panel_label(ax_b, "b")
+style_axis(ax_b)
+
+
+# =============================================================================
+# Panel c
+# =============================================================================
+ax_c.bar(
+    x,
+    rank1_frequency,
+    width=0.68,
+    color=colors,
+    edgecolor=edge_color,
+    linewidth=0.4,
+)
+
+for index, value in enumerate(rank1_frequency):
+    ax_c.text(
+        index,
+        value + 2.0,
+        f"{value:.1f}%",
+        ha="center",
+        va="bottom",
+        fontsize=5.3,
+        fontweight=(
+            "bold"
+            if labels[index] == "1Re-4Ni"
+            else "normal"
+        ),
+    )
+
+ax_c.text(
+    0.03,
+    0.95,
+    "Ranked by region fraction;\nmean ΔY resolves ties",
+    transform=ax_c.transAxes,
+    ha="left",
+    va="top",
+    fontsize=5.2,
+    color="#444444",
+)
+
+ax_c.set_ylim(0, 108)
+ax_c.set_yticks(
+    [0, 20, 40, 60, 80, 100]
+)
+
+ax_c.set_ylabel(
+    "Rank-1 frequency (%)"
+)
+
+ax_c.set_xticks(x)
+ax_c.set_xticklabels(
+    labels,
+    rotation=38,
+    ha="right",
+    rotation_mode="anchor",
+)
+
+panel_label(ax_c, "c")
+style_axis(ax_c)
+
+# plt.savefig('./figure_supp_8.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_8.pdf', dpi=600, bbox_inches='tight')
+plt.show()
+
+#%% Supplementary figures - Fig. 17 (Process-level cost breakdown)
+# ── Nature figure settings ────────────────────────────────
+plt.rcParams["font.family"]        = "sans-serif"
+plt.rcParams["font.sans-serif"]    = ["Arial"]
+plt.rcParams["axes.unicode_minus"] = False
+plt.rcParams["axes.linewidth"]     = 0.8
+plt.rcParams["pdf.fonttype"]       = 42   
+plt.rcParams["ps.fonttype"]        = 42
+
+# Font sizes (pt) 
+FS_LABEL = 8     
+FS_AXIS  = 7      
+FS_TICK  = 6     
+FS_DATA  = 6     
+FS_LEG   = 6.5   
+
+cases = ["Ni-Re", "Pd"]
+
+OPERATING_HOURS = 8000
+
+raw_cost = pd.DataFrame({
+    "Ni-Re": {
+        "Furfural":  76_868_480,
+        "H2":        13_304_808,
+        "IPA":        6_249_975.68,
+        "Catalyst":     510_720,
+    },
+    "Pd": {
+        "Furfural":  76_868_480,
+        "H2":        13_304_808,
+        "IPA":        6_249_975.68,
+        "Catalyst":  33_951_168,
+    }
+})
+
+summary = pd.DataFrame({
+    "THFA production (10$^3$ ton/yr)": {
+        "Ni-Re": 68_875 / 1e3,
+        "Pd":    71_027 / 1e3,
+    },
+    "Utility cost (M$/yr)": {
+        "Ni-Re": 10_396_138 / 1e6,
+        "Pd":     9_887_154 / 1e6,
+    },
+    "CAPEX (M$)": {
+        "Ni-Re": 9_475_630 / 1e6,
+        "Pd":     8_985_560 / 1e6,
+    }
+})
+
+colors_raw = {
+    "Furfural":  "#4C78A8",
+    "H2":        "#F58518",
+    "IPA":       "#B279A2",
+    "Catalyst":  "#54A24B",
+}
+legend_labels = {
+    "Furfural": "Furfural",
+    "H2":       "H$_2$",
+    "IPA":      "IPA",
+    "Catalyst": "Catalyst",
+}
+colors_case = {
+    "Ni-Re": "#0F7C80",
+    "Pd":    "#B8BEC8",
+}
+
+fig = plt.figure(figsize=(7.09, 3.9), dpi=300)
+gs = GridSpec(
+    nrows=3, ncols=2, figure=fig,
+    width_ratios=[1.3, 1.0],
+    height_ratios=[1, 1, 1],
+    wspace=0.30, hspace=0.85
+)
+
+ax_raw       = fig.add_subplot(gs[:, 0])
+axes_summary = [fig.add_subplot(gs[i, 1]) for i in range(3)]
+
+# ── Panel a ────────────────────────────────────────────────
+x         = np.arange(len(cases))
+bar_width = 0.55
+bottom    = np.zeros(len(cases))
+totals    = raw_cost[cases].sum(axis=0).values
+
+for item in raw_cost.index:
+    values = raw_cost.loc[item, cases].values.astype(float)
+    ax_raw.bar(
+        x, values / 1e6,
+        bottom=bottom / 1e6,
+        width=bar_width,
+        color=colors_raw[item],
+        edgecolor="white",
+        linewidth=0.6,
+        label=legend_labels[item]
+    )
+    percents = values / totals * 100
+    for i, (v, p) in enumerate(zip(values, percents)):
+        if p >= 3:
+            ax_raw.text(
+                x[i], (bottom[i] + v / 2) / 1e6,
+                f"{p:.1f}%",
+                ha="center", va="center",
+                fontsize=FS_DATA, color="black"
+            )
+    bottom += values
+
+for i, total in enumerate(totals / 1e6):
+    ax_raw.text(
+        x[i], total + 3.0,
+        f"{total:.2f} M$/yr",
+        ha="center", va="bottom",
+        fontsize=FS_DATA
+    )
+
+ax_raw.set_ylabel("Raw material cost (M$/yr)", fontsize=FS_AXIS)
+ax_raw.set_xticks(x)
+ax_raw.set_xticklabels(["1Re-4Ni", "5Pd"])
+ax_raw.set_ylim(0, max(totals / 1e6) * 1.18)
+ax_raw.tick_params(direction="in", length=3, width=0.8, labelsize=FS_TICK)
+ax_raw.spines["top"].set_visible(False)
+ax_raw.spines["right"].set_visible(False)
+ax_raw.legend(
+    frameon=False, fontsize=FS_LEG, loc="upper left",
+    bbox_to_anchor=(0.02, 0.98), handlelength=1.2, handletextpad=0.5
+)
+ax_raw.set_title("a", loc="left", fontsize=FS_LABEL, fontweight="bold", pad=4)
+
+# ── Panels b-d ─────────────────────────────────────────────
+panel_letters = ["b", "c", "d"]
+
+for ax, metric, letter in zip(axes_summary, summary.columns, panel_letters):
+    vals  = summary[metric].loc[cases].values
+    y_pos = np.arange(len(cases))
+
+    bars = ax.barh(
+        y_pos, vals, height=0.5,
+        color=[colors_case[c] for c in cases],
+        edgecolor="black", linewidth=0.5
+    )
+
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(["1Re-4Ni", "5Pd"])
+    ax.invert_yaxis()
+
+    for bar, v in zip(bars, vals):
+        fmt = f"{v:.3f}" if metric == "CAPEX (M$)" else f"{v:.2f}"
+        ax.text(
+            bar.get_width() + max(vals) * 0.03,
+            bar.get_y() + bar.get_height() / 2,
+            fmt, ha="left", va="center", fontsize=FS_DATA
+        )
+
+    ax.set_xlabel(metric, fontsize=FS_AXIS)          # 지표명 → x축 라벨 (단위 포함)
+    ax.set_xlim(0, max(vals) * 1.28)
+    ax.tick_params(direction="in", length=3, width=0.8, labelsize=FS_TICK)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.set_title(letter, loc="left", fontsize=FS_LABEL, fontweight="bold", pad=4)
+
+fig.tight_layout(pad=0.6, h_pad=0.8, w_pad=1.2)
+
+# plt.savefig('./figure_supp_17.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_17.pdf', dpi=600, bbox_inches='tight')
+plt.show()
+
+#%% Supplementary figures - Fig. 18 (Tornado sensitivity analysis)
+# =========================
+# Style — Nature figure spec
+# =========================
+plt.rcParams['font.family']        = 'sans-serif'     
+plt.rcParams['font.sans-serif']    = ['Arial']
+plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['axes.linewidth']     = 0.8
+plt.rcParams['pdf.fonttype']       = 42
+plt.rcParams['ps.fonttype']        = 42
+
+FS_LABEL = 8      
+FS_AXIS  = 7      
+FS_TICK  = 6     
+FS_DATA  = 5.5    
+FS_LEG   = 6.5   
+FS_BASE  = 6.5   
+
+# =========================
+# Sensitivity data
+# =========================
+data = {
+    "Pd": {
+        "base": 4019.23,
+        "FF price":       {"low": 3581.30, "high": 4457.26},
+        "Catalyst price": {"low": 3825.80, "high": 4212.66},
+        "H$_2$ price":    {"low": 3943.43, "high": 4095.03},
+        "Utility cost":   {"low": 3962.90, "high": 4075.56},
+        "IPA price":      {"low": 3983.62, "high": 4054.84},
+    },
+    "Ni-Re": {
+        "base": 3178.83,
+        "FF price":       {"low": 2727.22, "high": 3630.45},
+        "Catalyst price": {"low": 3175.41, "high": 3181.41},
+        "H$_2$ price":    {"low": 3100.41, "high": 3256.41},
+        "Utility cost":   {"low": 3117.41, "high": 3239.91},
+        "IPA price":      {"low": 3142.11, "high": 3215.41},
+    }
+}
+
+PARAM_ORDER = [
+    "FF price",
+    "Catalyst price",
+    "H$_2$ price",
+    "Utility cost",
+    "IPA price",
+]
+# =========================
+# Tornado plot
+# =========================
+def plot_tornado(ax, case_name, case_data, letter):
+    base = case_data["base"]
+
+    rows = []
+    for param, values in case_data.items():
+        if param == "base":
+            continue
+        low_delta  = values["low"]  - base
+        high_delta = values["high"] - base
+        rows.append({
+            "Parameter": param,
+            "Low MSP":   values["low"],
+            "High MSP":  values["high"],
+            "Low delta":  low_delta,
+            "High delta": high_delta,
+            "Range": abs(high_delta - low_delta)
+        })
+
+    df = (pd.DataFrame(rows)
+            .set_index("Parameter")
+            .loc[PARAM_ORDER[::-1]]
+            .reset_index())
+    y = np.arange(len(df))
+
+    ax.barh(y, df["Low delta"],  color="#4C78A8", alpha=0.90, height=0.62, label="-20%")
+    ax.barh(y, df["High delta"], color="#F58518", alpha=0.90, height=0.62, label="+20%")
+    ax.axvline(0, ymax=0.86, color="black", linewidth=0.9)
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(df["Parameter"], fontsize=FS_TICK)
+    ax.tick_params(axis="x", direction="in", length=3, width=0.8, labelsize=FS_TICK)
+    ax.tick_params(axis="y", length=0)    
+
+    ax.set_xlabel(r"MSP deviation from base case (\$/ton THFA)",
+                  fontsize=FS_AXIS, labelpad=4)
+    ax.set_title(letter, loc="left", fontsize=FS_LABEL, fontweight="bold", pad=6)
+
+    ax.text(0, len(df) - 1 + 0.7,
+            rf"{case_name}   Base MSP = {base:,.0f} \$/ton THFA",
+            ha="center", va="bottom", fontsize=FS_BASE)
+    x_span = max(abs(df["Low delta"]).max(), abs(df["High delta"]).max())
+    offset = x_span * 0.04
+    for i, row in df.iterrows():
+        ax.text(row["Low delta"]  - offset, i, f"{row['Low MSP']:,.0f}",
+                va="center", ha="right", fontsize=FS_DATA)
+        ax.text(row["High delta"] + offset, i, f"{row['High MSP']:,.0f}",
+                va="center", ha="left",  fontsize=FS_DATA)
+
+    ax.set_xlim(-x_span * 1.34, x_span * 1.34)
+    ax.set_ylim(-0.7, len(df) - 1 + 1.1)          
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    return df
+
+fig, axes = plt.subplots(1, 2, figsize=(7.09, 3.3), dpi=300)
+
+df_pd   = plot_tornado(axes[0], "5Pd",     data["Pd"],    "a")
+df_nire = plot_tornado(axes[1], "1Re-4Ni", data["Ni-Re"], "b")
+
+handles, labels = axes[0].get_legend_handles_labels()
+fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False,
+           fontsize=FS_LEG, bbox_to_anchor=(0.5, 1.02),
+           handlelength=1.2, handletextpad=0.5, columnspacing=1.5)
+
+fig.tight_layout(rect=[0, 0, 1, 0.93], w_pad=1.5)
+
+# plt.savefig('./figure_supp_18.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_18.pdf', dpi=600, bbox_inches='tight')
+plt.show()
+
+#%% Supplementary figures - Fig. 19 (MSP sensitivity analysis)
+
+plt.rcParams['font.family']        = 'sans-serif'
+plt.rcParams['font.sans-serif']    = ['Arial']
+plt.rcParams['axes.unicode_minus'] = False
+plt.rcParams['axes.linewidth']     = 0.8
+plt.rcParams['pdf.fonttype']       = 42
+plt.rcParams['ps.fonttype']        = 42
+
+FS_AXIS = 7
+FS_TICK = 6
+FS_LEG  = 6.5
+FS_BASE = 6  
+
+# =========================
+# Catalyst lifetime sensitivity data
+# =========================
+lifetime = np.array([0.5, 1, 2, 3])
+msp_nire = [3193.84, 3178.83, 3171.33, 3168.83]
+msp_pd   = [4986.36, 4019.23, 3535.67, 3374.16]
+# =========================
+# Line plot — single column 89 mm ≈ 3.5 in
+# =========================
+fig, ax = plt.subplots(figsize=(3.35, 2.9), dpi=300)
+
+
+ax.axvline(1.0, color="0.55", linewidth=0.8, linestyle="--", zorder=0)
+
+ax.plot(lifetime, msp_pd, marker="o", markersize=4.5, linewidth=1.0,
+        color="#EE854A", label="5Pd/Al$_2$O$_3$", zorder=3)
+ax.plot(lifetime, msp_nire, marker="*", markersize=7, linewidth=1.0,
+        color="#2166AC", label="1Re-4Ni/Al$_2$O$_3$", zorder=3)
+
+ax.set_xlabel("Catalyst lifetime (years)", fontsize=FS_AXIS, labelpad=4)
+ax.set_ylabel(r"MSP (\$/ton THFA)", fontsize=FS_AXIS, labelpad=4)
+
+ax.set_xticks(lifetime)
+ax.tick_params(direction="in", length=3, width=0.8, labelsize=FS_TICK)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+
+ax.text(1.0, ax.get_ylim()[1], " Baseline", ha="left", va="top",
+        fontsize=FS_BASE, color="0.35")
+ax.legend(frameon=False, fontsize=FS_LEG, loc="upper right",
+          handlelength=1.5, handletextpad=0.5)
+
+fig.tight_layout()
+
+# plt.savefig('./figure_supp_19.png', dpi=600, bbox_inches='tight')
+# plt.savefig('./figure_supp_19.pdf', dpi=600, bbox_inches='tight')
 plt.show()

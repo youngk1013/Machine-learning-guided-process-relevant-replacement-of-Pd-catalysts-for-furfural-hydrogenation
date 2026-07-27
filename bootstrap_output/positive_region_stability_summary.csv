@@ -1,0 +1,7 @@
+Catalyst,Nominal fraction (%),Bootstrap median fraction (%),Bootstrap 2.5th fraction (%),Bootstrap 97.5th fraction (%),Non-zero region frequency (%),Rank-1 frequency (%)
+1Co-4Ni,0.0,0.0,0.0,0.0,0.5,0.5
+1Fe-4Ni,0.0,0.0,0.0,0.0,1.0,3.0
+1Cu-4Ni,0.0,0.0,0.0,0.0,1.0,0.0
+1Ca-4Ni,0.0,0.0,0.0,0.0,1.5,1.0
+1Zn-4Ni,0.0,0.0,0.0,0.0,1.5,0.0
+1Re-4Ni,64.1772920461445,1.5280307630034407,0.0,93.9991904472779,51.0,95.5
