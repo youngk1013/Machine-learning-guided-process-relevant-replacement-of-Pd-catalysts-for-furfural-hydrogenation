@@ -1,7 +1,6 @@
 *.cbm filter=lfs diff=lfs merge=lfs -text
 *.pkl filter=lfs diff=lfs merge=lfs -text
-hyperparameter_tuning/output/*.json filter=lfs diff=lfs merge=lfs -text
-hyperparameter_tuning/output/*.cbm filter=lfs diff=lfs merge=lfs -text
-hyperparameter_tuning/output/*.pkl filter=lfs diff=lfs merge=lfs -text
-base_model/output/*.cbm filter=lfs diff=lfs merge=lfs -text
-base_model/output/*.pkl filter=lfs diff=lfs merge=lfs -text
+*.pickle filter=lfs diff=lfs merge=lfs -text
+*.joblib filter=lfs diff=lfs merge=lfs -text
+hyperparameter_tuning/output/** filter=lfs diff=lfs merge=lfs -text
+base_model/output/** filter=lfs diff=lfs merge=lfs -text
