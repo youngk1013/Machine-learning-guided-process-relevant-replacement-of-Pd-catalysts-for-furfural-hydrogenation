@@ -1,0 +1,15 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Trained model files
+*.cbm
+*.pkl
+
+# Generated model outputs
+base_model/output/*
+hyperparameter_tuning/output/*
+
+# Keep empty output directories
+!base_model/output/.gitkeep
+!hyperparameter_tuning/output/.gitkeep
